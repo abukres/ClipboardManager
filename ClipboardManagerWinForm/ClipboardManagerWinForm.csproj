@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net11.0-windows</TargetFramework>
+        <Nullable>enable</Nullable>
+        <UseWindowsForms>true</UseWindowsForms>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <ApplicationIcon>app.ico</ApplicationIcon>
+        <AssemblyTitle>Clipboard Manager</AssemblyTitle>
+        <Product>Clipboard Manager</Product>
+        <AssemblyName>ClipboardManager</AssemblyName>
+        <RootNamespace>ClipboardManagerWinForm</RootNamespace>
+        <Version>1.0.0</Version>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="11.0.0-preview.2.26159.112" />
+        <EmbeddedResource Include="app.ico" LogicalName="app.ico" />
+    </ItemGroup>
+
+</Project>

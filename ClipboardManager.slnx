@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="ClipboardManagerWinForm/ClipboardManagerWinForm.csproj" />
+  <Project Path="ClipboardManagerWinForm.Tests/ClipboardManagerWinForm.Tests.csproj" />
+</Solution>
