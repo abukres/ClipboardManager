@@ -70,5 +70,29 @@ public sealed class HistoryService(ClipboardRepository repository, SettingsStore
         return settingsStore.Settings.ShowStickiesInMenu ? repository.GetStickies() : [];
     }
 
+    /// <summary>
+    /// The older clips of the archive that are not part of the history, sorted from newest to oldest.
+    /// The history clips are skipped, because the paste menu already shows them.
+    /// </summary>
+    public IReadOnlyList<ClipEntry> GetMoreHistoryEntries()
+    {
+        var history = GetHistoryEntries();
+        var limit = Math.Max(1, settingsStore.Settings.MaxArchiveSearchResults);
+
+        List<ClipEntry> entries = [];
+        var knownTexts = new HashSet<string>(history.Select(entry => entry.Text), StringComparer.Ordinal);
+
+        // The archive also holds the history clips, so the remaining clips are the older ones.
+        foreach (var entry in repository.GetArchive(history.Count + limit))
+        {
+            if (knownTexts.Add(entry.Text))
+            {
+                entries.Add(entry);
+            }
+        }
+
+        return entries;
+    }
+
     public void ClearHistory() => repository.ClearHistory();
 }

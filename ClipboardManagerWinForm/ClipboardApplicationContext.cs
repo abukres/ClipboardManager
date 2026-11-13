@@ -125,7 +125,8 @@ public sealed class ClipboardApplicationContext : ApplicationContext
                 _historyService.GetHistoryEntries(),
                 _historyService.GetStickyEntries(),
                 Math.Clamp(Settings.PasteMenuCursorPosition, 0, 1),
-                previousWidth);
+                previousWidth,
+                _historyService.GetMoreHistoryEntries);
 
             if (result.Width > 0 && result.Width != previousWidth)
             {

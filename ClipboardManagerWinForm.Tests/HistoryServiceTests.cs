@@ -117,6 +117,49 @@ public sealed class HistoryServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetMoreHistoryEntries_ReturnsOnlyOlderArchiveEntriesNewestFirst()
+    {
+        _settingsStore.Settings.HistoryDepth = 2;
+
+        _service.Capture("first entry");
+        _service.Capture("second entry");
+        _service.Capture("third entry");
+
+        var entries = _service.GetMoreHistoryEntries();
+
+        // "third entry" and "second entry" are already part of the history, so they are skipped.
+        Assert.Single(entries);
+        Assert.Equal("first entry", entries[0].Text);
+        Assert.All(entries, entry => Assert.False(entry.IsSticky));
+    }
+
+    [Fact]
+    public void GetMoreHistoryEntries_SkipsAllClipsWhileHistoryIsEmpty()
+    {
+        _service.Capture("only entry");
+
+        // The clip is still part of the history, so no older clips are left.
+        Assert.Empty(_service.GetMoreHistoryEntries());
+
+        _repository.ClearHistory();
+
+        var entries = _service.GetMoreHistoryEntries();
+
+        Assert.Single(entries);
+        Assert.Equal("only entry", entries[0].Text);
+    }
+
+    [Fact]
+    public void GetMoreHistoryEntries_ReturnsNothingWhenArchiveIsDisabled()
+    {
+        _settingsStore.Settings.AddToArchive = false;
+
+        _service.Capture("only entry");
+
+        Assert.Empty(_service.GetMoreHistoryEntries());
+    }
+
+    [Fact]
     public void Capture_RaisesTextCapturedEvent()
     {
         string? captured = null;

@@ -9,6 +9,7 @@ public enum PasteMenuCommand
 {
     None,
     Paste,
+    MoreHistory,
     ClearClipboard,
     AddClipboardToStickies,
     Archive,
@@ -25,6 +26,8 @@ public sealed class PasteMenuForm : Form
     private const string ArchiveAccelerator = "A";
 
     private readonly MenuListControl _list;
+    private readonly IReadOnlyList<ClipEntry> _stickies;
+    private readonly Func<IReadOnlyList<ClipEntry>>? _moreHistoryProvider;
     private GlobalMouseHook? _mouseHook;
     private bool _closing;
 
@@ -32,7 +35,8 @@ public sealed class PasteMenuForm : Form
         IReadOnlyList<ClipEntry> history,
         IReadOnlyList<ClipEntry> stickies,
         int initialIndex,
-        int preferredWidth)
+        int preferredWidth,
+        Func<IReadOnlyList<ClipEntry>>? moreHistoryProvider = null)
     {
         AutoScaleMode = AutoScaleMode.None;
         FormBorderStyle = FormBorderStyle.None;
@@ -44,7 +48,10 @@ public sealed class PasteMenuForm : Form
         Padding = new Padding(1);
         DoubleBuffered = true;
 
-        var rows = BuildRows(history, stickies);
+        _stickies = stickies;
+        _moreHistoryProvider = moreHistoryProvider;
+
+        var rows = BuildRows(history, stickies, moreHistoryProvider is not null);
         _list = new MenuListControl(rows, preferredWidth)
         {
             Dock = DockStyle.Fill
@@ -80,9 +87,10 @@ public sealed class PasteMenuForm : Form
         IReadOnlyList<ClipEntry> history,
         IReadOnlyList<ClipEntry> stickies,
         int initialIndex,
-        int preferredWidth)
+        int preferredWidth,
+        Func<IReadOnlyList<ClipEntry>>? moreHistoryProvider = null)
     {
-        using var form = new PasteMenuForm(history, stickies, initialIndex, preferredWidth);
+        using var form = new PasteMenuForm(history, stickies, initialIndex, preferredWidth, moreHistoryProvider);
         form.ShowDialog();
         return form.Result with { Width = form.WasWidthResized ? form.MenuWidth : 0 };
     }
@@ -221,11 +229,38 @@ public sealed class PasteMenuForm : Form
 
     private void HandleItemActivated(object? sender, MenuRow row)
     {
+        if (row.Command == PasteMenuCommand.MoreHistory)
+        {
+            ShowMoreHistory();
+            return;
+        }
+
         Result = row.Entry is not null
             ? new PasteMenuResult(PasteMenuCommand.Paste, row.Entry)
             : new PasteMenuResult(row.Command, null);
 
         Close();
+    }
+
+    private void ShowMoreHistory()
+    {
+        // Only the older clips are listed, the clips that are already shown are skipped.
+        var entries = _moreHistoryProvider?.Invoke() ?? [];
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        var rows = BuildRows(entries, _stickies, showMoreHistory: false);
+
+        _list.SetRows(rows, expanded: true);
+        _list.SelectInitial(0);
+
+        var size = _list.MeasureContent();
+        ClientSize = new Size(size.Width + BorderWidth, size.Height + BorderWidth);
+        PositionNearCursor();
+
+        _list.Focus();
     }
 
     private void PositionNearCursor()
@@ -252,7 +287,10 @@ public sealed class PasteMenuForm : Form
         Location = new Point(x, y);
     }
 
-    private static List<MenuRow> BuildRows(IReadOnlyList<ClipEntry> history, IReadOnlyList<ClipEntry> stickies)
+    private static List<MenuRow> BuildRows(
+        IReadOnlyList<ClipEntry> history,
+        IReadOnlyList<ClipEntry> stickies,
+        bool showMoreHistory)
     {
         List<MenuRow> rows = [];
 
@@ -262,6 +300,11 @@ public sealed class PasteMenuForm : Form
         }
 
         rows.Add(MenuRow.Separator());
+
+        if (showMoreHistory)
+        {
+            rows.Add(MenuRow.ForCommand("More History", PasteMenuCommand.MoreHistory));
+        }
 
         rows.Add(MenuRow.ForCommand("Clear Clipboard content", PasteMenuCommand.ClearClipboard));
 
@@ -332,6 +375,8 @@ public sealed class PasteMenuForm : Form
         private readonly int _preferredWidth;
         private int _selectedIndex = -1;
         private int _scrollOffset;
+        private int _acceleratorWidth;
+        private bool _expanded;
         private bool _resizingWidth;
         private int _resizeStartCursorX;
         private int _resizeStartWidth;
@@ -344,6 +389,7 @@ public sealed class PasteMenuForm : Form
             _preferredWidth = preferredWidth;
             Font = Theme.BodyFont;
             BackColor = Theme.MenuBackground;
+            UpdateMetrics();
             SetStyle(
                 ControlStyles.OptimizedDoubleBuffer |
                 ControlStyles.AllPaintingInWmPaint |
@@ -360,14 +406,22 @@ public sealed class PasteMenuForm : Form
 
         private int SeparatorHeight => 8;
 
+        /// <summary>
+        /// Replaces the rows, optionally expanding the list to the full screen height for older clips.
+        /// </summary>
+        public void SetRows(List<MenuRow> rows, bool expanded)
+        {
+            _rows.Clear();
+            _rows.AddRange(rows);
+            _expanded = expanded;
+            _selectedIndex = -1;
+            _scrollOffset = 0;
+            UpdateMetrics();
+            Invalidate();
+        }
+
         public Size MeasureContent()
         {
-            var acceleratorWidth = _rows
-                .Where(row => !row.IsSeparator)
-                .Select(row => TextRenderer.MeasureText(row.Accelerator, Font).Width)
-                .DefaultIfEmpty(0)
-                .Max();
-
             var textWidth = _rows
                 .Where(row => !row.IsSeparator)
                 .Select(row => TextRenderer.MeasureText(row.Text, Font, new Size(int.MaxValue, ItemHeight)).Width)
@@ -377,15 +431,19 @@ public sealed class PasteMenuForm : Form
             var width = _preferredWidth > 0
                 ? ClampWidth(_preferredWidth)
                 : Math.Clamp(
-                    HorizontalPadding + acceleratorWidth + AcceleratorSpacing + textWidth + HorizontalPadding + 12,
+                    HorizontalPadding + _acceleratorWidth + AcceleratorSpacing + textWidth + HorizontalPadding + 12,
                     MinimumWidth,
                     AutoWidth);
 
             var contentHeight = ContentHeight;
-            var maxHeight = (Screen.FromPoint(Cursor.Position).WorkingArea.Height * 6) / 10;
-            var height = Math.Min(contentHeight, maxHeight);
+            var workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
 
-            return new Size(width, height);
+            // Older clips use the full height of the screen so that as many clips as possible are visible.
+            var maxHeight = _expanded
+                ? Math.Max(0, workingArea.Height - PasteMenuForm.BorderWidth)
+                : (workingArea.Height * 6) / 10;
+
+            return new Size(width, Math.Min(contentHeight, maxHeight));
         }
 
         public void SelectInitial(int index)
@@ -476,12 +534,7 @@ public sealed class PasteMenuForm : Form
                 e.Graphics.FillRectangle(background, ClientRectangle);
             }
 
-            var acceleratorWidth = _rows
-                .Where(row => !row.IsSeparator)
-                .Select(row => TextRenderer.MeasureText(row.Accelerator, Font).Width)
-                .DefaultIfEmpty(0)
-                .Max();
-
+            var acceleratorWidth = _acceleratorWidth;
             var textLeft = HorizontalPadding + acceleratorWidth + AcceleratorSpacing;
             var y = 2 - _scrollOffset;
 
@@ -671,6 +724,15 @@ public sealed class PasteMenuForm : Form
         }
 
         private int MaxScrollOffset => Math.Max(0, ContentHeight - Height);
+
+        private void UpdateMetrics()
+        {
+            _acceleratorWidth = _rows
+                .Where(row => !row.IsSeparator)
+                .Select(row => TextRenderer.MeasureText(row.Accelerator, Font).Width)
+                .DefaultIfEmpty(0)
+                .Max();
+        }
 
         private bool IsInResizeGrip(int x)
         {
