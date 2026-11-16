@@ -78,6 +78,41 @@ public sealed class ClipboardRepositoryTests : IDisposable
     }
 
     [Fact]
+    public void PromoteHistory_MovesClipToTheNewestPosition()
+    {
+        var now = DateTime.UtcNow;
+
+        _repository.AddHistory("first", now, 10);
+        _repository.AddHistory("second", now.AddSeconds(1), 10);
+        _repository.AddHistory("third", now.AddSeconds(2), 10);
+
+        _repository.PromoteHistory("first", now.AddSeconds(3), 10);
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Equal(["first", "third", "second"], history.Select(entry => entry.Text));
+    }
+
+    [Fact]
+    public void PromoteHistory_KeepsASingleCopyOfTheClip()
+    {
+        var now = DateTime.UtcNow;
+
+        _repository.AddHistory("repeated", now, 10);
+        _repository.AddHistory("other", now.AddSeconds(1), 10);
+        _repository.AddHistory("repeated", now.AddSeconds(2), 10);
+        _repository.AddHistory("another", now.AddSeconds(3), 10);
+
+        _repository.PromoteHistory("repeated", now.AddSeconds(4), 10);
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Equal(3, history.Count);
+        Assert.Equal("repeated", history[0].Text);
+        Assert.Single(history, entry => entry.Text == "repeated");
+    }
+
+    [Fact]
     public void SearchArchive_MatchesAllKeywordsAndExcludesTerms()
     {
         var now = DateTime.UtcNow;

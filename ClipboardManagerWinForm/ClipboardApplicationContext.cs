@@ -88,17 +88,23 @@ public sealed class ClipboardApplicationContext : ApplicationContext
         ApplySettings();
     }
 
-    public void CopyToClipboard(string text)
+    public bool CopyToClipboard(string text, bool addToHistory = true)
     {
         _suppressCapture = true;
 
         if (!ClipboardService.SetText(text))
         {
             _suppressCapture = false;
-            return;
+            return false;
+        }
+
+        if (addToHistory)
+        {
+            _historyService.Reuse(text);
         }
 
         _notifyIcon.Text = TextFilters.CreateTooltip(text);
+        return true;
     }
 
     public void ShowPasteMenu()
@@ -368,15 +374,11 @@ public sealed class ClipboardApplicationContext : ApplicationContext
 
     private async void PasteEntry(IntPtr target, ClipEntry entry)
     {
-        _suppressCapture = true;
-
-        if (!ClipboardService.SetText(entry.Text))
+        if (!CopyToClipboard(entry.Text, addToHistory: !entry.IsSticky))
         {
-            _suppressCapture = false;
             return;
         }
 
-        _notifyIcon.Text = TextFilters.CreateTooltip(entry.Text);
         RestoreFocus(target);
 
         await Task.Delay(80);
@@ -534,7 +536,7 @@ public sealed class ClipboardApplicationContext : ApplicationContext
     private ToolStripMenuItem CreateStickyMenuItem(ClipEntry sticky)
     {
         var item = new ToolStripMenuItem(TextFilters.Summarize(sticky.DisplayText, 62));
-        item.Click += (_, _) => CopyToClipboard(sticky.Text);
+        item.Click += (_, _) => CopyToClipboard(sticky.Text, addToHistory: false);
         return item;
     }
 

@@ -25,11 +25,17 @@ public sealed class PasteMenuForm : Form
 
     private const string ArchiveAccelerator = "A";
 
+    private const int MoreHistoryHoverDelayMs = 1000;
+
     private readonly MenuListControl _list;
     private readonly IReadOnlyList<ClipEntry> _stickies;
     private readonly Func<IReadOnlyList<ClipEntry>>? _moreHistoryProvider;
+    private readonly List<MenuRow> _defaultRows;
+    private readonly System.Windows.Forms.Timer _moreHistoryTimer;
+    private readonly int _initialRow;
     private GlobalMouseHook? _mouseHook;
     private bool _closing;
+    private bool _moreHistoryShown;
 
     public PasteMenuForm(
         IReadOnlyList<ClipEntry> history,
@@ -51,13 +57,23 @@ public sealed class PasteMenuForm : Form
         _stickies = stickies;
         _moreHistoryProvider = moreHistoryProvider;
 
+        _moreHistoryTimer = new System.Windows.Forms.Timer
+        {
+            Interval = MoreHistoryHoverDelayMs
+        };
+        _moreHistoryTimer.Tick += HandleMoreHistoryTimerTick;
+
         var rows = BuildRows(history, stickies, moreHistoryProvider is not null);
+        _defaultRows = [.. rows];
+
         _list = new MenuListControl(rows, preferredWidth)
         {
             Dock = DockStyle.Fill
         };
 
         _list.ItemActivated += HandleItemActivated;
+        _list.ItemHovered += HandleItemHovered;
+        _list.HoverLeft += HandleHoverLeft;
         _list.CancelRequested += (_, _) => Close();
         Controls.Add(_list);
 
@@ -65,8 +81,8 @@ public sealed class PasteMenuForm : Form
         ClientSize = new Size(size.Width + BorderWidth, size.Height + BorderWidth);
 
         // "Place cursor in paste menu at" refers to the history items only, never to a command.
-        var initialRow = history.Count == 0 ? -1 : Math.Min(initialIndex, history.Count - 1);
-        _list.SelectInitial(initialRow);
+        _initialRow = history.Count == 0 ? -1 : Math.Min(initialIndex, history.Count - 1);
+        _list.SelectInitial(_initialRow);
 
         PositionNearCursor();
     }
@@ -119,6 +135,8 @@ public sealed class PasteMenuForm : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        _moreHistoryTimer.Stop();
+        _moreHistoryTimer.Dispose();
         ReleaseMouseHook();
         base.OnFormClosed(e);
     }
@@ -127,6 +145,13 @@ public sealed class PasteMenuForm : Form
     {
         if (_closing || IsDisposed || !Visible || window == Handle)
         {
+            return;
+        }
+
+        // The older clips are hidden by an outside click, the popup with the usual clips stays open.
+        if (_moreHistoryShown)
+        {
+            BeginInvoke((Action)HideMoreHistory);
             return;
         }
 
@@ -201,10 +226,19 @@ public sealed class PasteMenuForm : Form
     {
         base.OnDeactivate(e);
 
-        if (!IsDisposed)
+        if (IsDisposed)
         {
-            Close();
+            return;
         }
+
+        // The older clips are only hidden, because the popup with the usual clips is still wanted.
+        if (_moreHistoryShown)
+        {
+            HideMoreHistory();
+            return;
+        }
+
+        Close();
     }
 
     private static char KeyCodeToAccelerator(Keys keyCode)
@@ -242,8 +276,58 @@ public sealed class PasteMenuForm : Form
         Close();
     }
 
+    private void HandleItemHovered(object? sender, MenuRow row)
+    {
+        // The older clips only appear when the pointer rests on the command for a moment, so a slide
+        // over the row does not expand the popup by accident.
+        if (row.Command == PasteMenuCommand.MoreHistory)
+        {
+            StartMoreHistoryTimer();
+            return;
+        }
+
+        StopMoreHistoryTimer();
+    }
+
+    private void HandleHoverLeft(object? sender, EventArgs e)
+    {
+        StopMoreHistoryTimer();
+    }
+
+    private void StartMoreHistoryTimer()
+    {
+        if (_moreHistoryShown || _moreHistoryProvider is null || _moreHistoryTimer.Enabled)
+        {
+            return;
+        }
+
+        _moreHistoryTimer.Start();
+    }
+
+    private void StopMoreHistoryTimer()
+    {
+        if (_moreHistoryTimer.Enabled)
+        {
+            _moreHistoryTimer.Stop();
+        }
+    }
+
+    private void HandleMoreHistoryTimerTick(object? sender, EventArgs e)
+    {
+        StopMoreHistoryTimer();
+        ShowMoreHistory();
+    }
+
     private void ShowMoreHistory()
     {
+        StopMoreHistoryTimer();
+
+        // The row is activated by hovering it, so the archive is queried only once.
+        if (_moreHistoryShown)
+        {
+            return;
+        }
+
         // Only the older clips are listed, the clips that are already shown are skipped.
         var entries = _moreHistoryProvider?.Invoke() ?? [];
         if (entries.Count == 0)
@@ -251,16 +335,43 @@ public sealed class PasteMenuForm : Form
             return;
         }
 
+        _moreHistoryShown = true;
+
         var rows = BuildRows(entries, _stickies, showMoreHistory: false);
 
         _list.SetRows(rows, expanded: true);
         _list.SelectInitial(0);
 
-        var size = _list.MeasureContent();
-        ClientSize = new Size(size.Width + BorderWidth, size.Height + BorderWidth);
+        ResizeToContent();
         PositionNearCursor();
 
         _list.Focus();
+    }
+
+    /// <summary>
+    /// Hides the older clips again, so the popup shows the usual clipboard history.
+    /// </summary>
+    private void HideMoreHistory()
+    {
+        StopMoreHistoryTimer();
+
+        if (!_moreHistoryShown)
+        {
+            return;
+        }
+
+        _moreHistoryShown = false;
+
+        _list.SetRows([.. _defaultRows], expanded: false);
+        _list.SelectInitial(_initialRow);
+
+        ResizeToContent();
+    }
+
+    private void ResizeToContent()
+    {
+        var size = _list.MeasureContent();
+        ClientSize = new Size(size.Width + BorderWidth, size.Height + BorderWidth);
     }
 
     private void PositionNearCursor()
@@ -374,6 +485,7 @@ public sealed class PasteMenuForm : Form
         private readonly List<MenuRow> _rows;
         private readonly int _preferredWidth;
         private int _selectedIndex = -1;
+        private int _hoveredIndex = -1;
         private int _scrollOffset;
         private int _acceleratorWidth;
         private bool _expanded;
@@ -400,6 +512,16 @@ public sealed class PasteMenuForm : Form
 
         public event EventHandler<MenuRow>? ItemActivated;
 
+        /// <summary>
+        /// Raised when the mouse pointer moves onto another row, so commands can react to hovering.
+        /// </summary>
+        public event EventHandler<MenuRow>? ItemHovered;
+
+        /// <summary>
+        /// Raised when the mouse pointer leaves the list, so a pending hover action can be cancelled.
+        /// </summary>
+        public event EventHandler? HoverLeft;
+
         public event EventHandler? CancelRequested;
 
         private int ItemHeight => Font.Height + 6;
@@ -415,6 +537,7 @@ public sealed class PasteMenuForm : Form
             _rows.AddRange(rows);
             _expanded = expanded;
             _selectedIndex = -1;
+            _hoveredIndex = -1;
             _scrollOffset = 0;
             UpdateMetrics();
             Invalidate();
@@ -606,11 +729,23 @@ public sealed class PasteMenuForm : Form
             }
 
             var index = HitTest(e.Y);
-            if (index >= 0 && index != _selectedIndex)
+            if (index == _hoveredIndex)
             {
-                _selectedIndex = index;
-                Invalidate();
+                return;
             }
+
+            _hoveredIndex = index;
+
+            if (index < 0)
+            {
+                // The pointer is on a separator or the empty space below the rows, so the hover ends.
+                HoverLeft?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
+            _selectedIndex = index;
+            Invalidate();
+            ItemHovered?.Invoke(this, _rows[index]);
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -664,6 +799,8 @@ public sealed class PasteMenuForm : Form
             if (!_resizingWidth)
             {
                 Cursor = Cursors.Default;
+                _hoveredIndex = -1;
+                HoverLeft?.Invoke(this, EventArgs.Empty);
             }
         }
 

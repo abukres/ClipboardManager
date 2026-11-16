@@ -14,6 +14,7 @@ Written with C# and .NET 11 (Windows Forms). Clipboard history is stored in a lo
   - Entries are numbered `1`–`9`, stickies use letters `B`–`Z` and `A` opens the archive; press the key or click to paste.
   - Arrow keys, `PageUp`/`PageDown`, `Home`/`End`, `Enter` and `Esc` work as expected.
   - Choosing an entry copies it to the Clipboard and sends `Ctrl+V` to the previously active window.
+  - Using a clip from the history or the archive makes it the first clip of the history again.
   - Pasted text is always pure text: only Unicode text is put on the Clipboard, so a destination cannot
     restore fonts, colors or links, and invisible formatting characters (no-break spaces, zero width
     joiners, soft hyphens) are removed.
@@ -21,8 +22,9 @@ Written with C# and .NET 11 (Windows Forms). Clipboard history is stored in a lo
   - Clicking anywhere outside the popup closes it.
   - The commands at the bottom open the archive window, open the configuration window, clear the
     Clipboard or add the current Clipboard content to the stickies.
-  - `More History` expands the popup to the full screen height and lists the older clips of the archive
-    that are not shown yet, sorted from newest to oldest.
+  - Hovering `More History` for one second expands the popup to the full screen height and lists the older
+    clips of the archive that are not shown yet, sorted from newest to oldest. Clicking outside the popup
+    hides the list again.
 - **Tray icon** with the recent entries, stickies, "Clear Clipboard content", archive, configuration and quit.
   The icon tooltip shows the most recent clipboard text. Double click opens the configuration window.
 - **Archive window** with a SQLite backed search:
@@ -50,7 +52,7 @@ custom data format.
 | Move through the menu | `↑` / `↓` / `PgUp` / `PgDn` / `Home` / `End` |
 | Close the menu | `Esc` |
 | Open the archive | `A` in the paste menu, `Archive...` in the paste menu or the tray menu |
-| Show older clips | `More History` in the paste menu |
+| Show older clips | Hover `More History` in the paste menu for one second |
 | Open configuration | Double click the tray icon (configurable) or run `ClipboardManager.exe --config` |
 
 The first number/letter of a history entry or sticky is its accelerator; the stickies start at `B`

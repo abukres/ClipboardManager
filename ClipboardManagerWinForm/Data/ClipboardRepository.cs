@@ -86,6 +86,54 @@ public sealed class ClipboardRepository(Database database)
         return id;
     }
 
+    /// <summary>
+    /// Moves a clip to the first position of the history, so it is the most recent clip again.
+    /// The clip is also added when the history does not contain it yet.
+    /// </summary>
+    public void PromoteHistory(string text, DateTime timestampUtc, int maxItems)
+    {
+        using var connection = Database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+
+        using (var deleteCommand = connection.CreateCommand())
+        {
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = "DELETE FROM History WHERE Text = @text;";
+            deleteCommand.Parameters.AddWithValue("@text", text);
+            deleteCommand.ExecuteNonQuery();
+        }
+
+        using (var insertCommand = connection.CreateCommand())
+        {
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = """
+                INSERT INTO History (Text, SearchText, CreatedTicks)
+                VALUES (@text, @searchText, @ticks);
+                """;
+            insertCommand.Parameters.AddWithValue("@text", text);
+            insertCommand.Parameters.AddWithValue("@searchText", ToSearchText(text));
+            insertCommand.Parameters.AddWithValue("@ticks", timestampUtc.ToUniversalTime().Ticks);
+            insertCommand.ExecuteNonQuery();
+        }
+
+        using (var trimCommand = connection.CreateCommand())
+        {
+            trimCommand.Transaction = transaction;
+            trimCommand.CommandText = """
+                DELETE FROM History
+                WHERE Id NOT IN (
+                    SELECT Id FROM History
+                    ORDER BY CreatedTicks DESC, Id DESC
+                    LIMIT @maxItems
+                );
+                """;
+            trimCommand.Parameters.AddWithValue("@maxItems", Math.Max(1, maxItems));
+            trimCommand.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     public void TrimHistory(int maxItems)
     {
         using var connection = Database.OpenConnection();

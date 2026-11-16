@@ -160,6 +160,79 @@ public sealed class HistoryServiceTests : IDisposable
     }
 
     [Fact]
+    public void Reuse_MovesClipToTheFirstHistoryPosition()
+    {
+        _service.Capture("first entry");
+        _service.Capture("second entry");
+        _service.Capture("third entry");
+
+        _service.Reuse("first entry");
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Equal(3, history.Count);
+        Assert.Equal("first entry", history[0].Text);
+        Assert.Single(history, entry => entry.Text == "first entry");
+    }
+
+    [Fact]
+    public void Reuse_AddsClipToHistoryWhenItIsNotPartOfItAnymore()
+    {
+        _service.Capture("first entry");
+        _service.Capture("second entry");
+        _repository.ClearHistory();
+
+        _service.Reuse("first entry");
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Single(history);
+        Assert.Equal("first entry", history[0].Text);
+    }
+
+    [Fact]
+    public void Reuse_TrimsHistoryToTheConfiguredDepth()
+    {
+        _settingsStore.Settings.HistoryDepth = 2;
+
+        _service.Capture("first entry");
+        _service.Capture("second entry");
+
+        _service.Reuse("third entry");
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Equal(2, history.Count);
+        Assert.Equal("third entry", history[0].Text);
+    }
+
+    [Fact]
+    public void Reuse_IgnoresTheCaptureFilters()
+    {
+        _settingsStore.Settings.MonitorClipboard = false;
+        _settingsStore.Settings.MinTextLengthEnabled = true;
+        _settingsStore.Settings.MinTextLength = 10;
+
+        _service.Reuse("abc");
+
+        var history = _repository.GetHistory(10);
+
+        Assert.Single(history);
+        Assert.Equal("abc", history[0].Text);
+    }
+
+    [Fact]
+    public void Reuse_DoesNotRaiseTextCapturedEvent()
+    {
+        var raised = 0;
+        _service.TextCaptured += (_, _) => raised++;
+
+        _service.Reuse("reused text");
+
+        Assert.Equal(0, raised);
+    }
+
+    [Fact]
     public void Capture_RaisesTextCapturedEvent()
     {
         string? captured = null;

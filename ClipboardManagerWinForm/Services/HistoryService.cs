@@ -54,6 +54,16 @@ public sealed class HistoryService(ClipboardRepository repository, SettingsStore
         return true;
     }
 
+    /// <summary>
+    /// Puts a clip that the user took from the history or the archive to the first position of the
+    /// history, so it is the most recent clip again. The capture filters do not apply, because the
+    /// user picked the clip on purpose.
+    /// </summary>
+    public void Reuse(string text)
+    {
+        repository.PromoteHistory(text, DateTime.UtcNow, Math.Clamp(settingsStore.Settings.HistoryDepth, 2, 100));
+    }
+
     private static bool IsArchiveSizeAllowed(string text, AppSettings settings)
     {
         return settings.ArchiveLimitSizeKb <= 0 ||
